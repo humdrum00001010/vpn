@@ -1,0 +1,45 @@
+services:
+  coordinator:
+    build:
+      context: ./coordinator
+    environment:
+      PORT: "4000"
+      MIX_ENV: "dev"
+    ports:
+      - "4000:4000"
+      - "3478:3478/udp"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:4000/healthz"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  client_a:
+    build:
+      context: ./clients/rendezvous-client
+    depends_on:
+      coordinator:
+        condition: service_healthy
+    environment:
+      COORDINATOR_HOST: "coordinator"
+      COORDINATOR_HTTP_PORT: "4000"
+      COORDINATOR_UDP_PORT: "3478"
+      ROOM: "demo"
+      CLIENT_ID: "a"
+      PEER_ID: "b"
+      TIMEOUT_SECS: "15"
+
+  client_b:
+    build:
+      context: ./clients/rendezvous-client
+    depends_on:
+      coordinator:
+        condition: service_healthy
+    environment:
+      COORDINATOR_HOST: "coordinator"
+      COORDINATOR_HTTP_PORT: "4000"
+      COORDINATOR_UDP_PORT: "3478"
+      ROOM: "demo"
+      CLIENT_ID: "b"
+      PEER_ID: "a"
+      TIMEOUT_SECS: "15"
