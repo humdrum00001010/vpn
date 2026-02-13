@@ -1,6 +1,6 @@
 use std::net::Ipv4Addr;
 
-pub const CAPTURE_INTERFACE: &str = "en0";
+pub const PREFERRED_INTERFACE: &str = "veth0";
 pub const MONITORED_IP: &str = "192.168.1.10";
 pub const TUNNEL_TARGET: &str = "127.0.0.1:4002";
 

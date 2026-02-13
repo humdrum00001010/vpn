@@ -1,7 +1,8 @@
 use std::io;
-use std::net::{SocketAddr, UdpSocket};
+use std::net::TcpStream;
+use std::io::Write;
 
-pub fn forward_packet(socket: &UdpSocket, target: SocketAddr, packet: &[u8]) -> io::Result<usize> {
+pub fn forward_packet(stream: &mut TcpStream, packet: &[u8]) -> io::Result<usize> {
     if packet.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -9,38 +10,46 @@ pub fn forward_packet(socket: &UdpSocket, target: SocketAddr, packet: &[u8]) -> 
         ));
     }
 
-    socket.send_to(packet, target)
+    stream.write_all(packet)?;
+    Ok(packet.len())
 }
 
 #[cfg(test)]
 mod tests {
     use super::forward_packet;
     use std::io;
-    use std::net::UdpSocket;
+    use std::net::{Shutdown, TcpStream};
     use std::time::Duration;
+
+    mod tcp_server {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/support/tcp_server.rs"
+        ));
+    }
 
     #[test]
     fn forwards_packet_bytes_to_target_socket() -> io::Result<()> {
-        let receiver = UdpSocket::bind("127.0.0.1:0")?;
-        receiver.set_read_timeout(Some(Duration::from_millis(500)))?;
-        let sender = UdpSocket::bind("127.0.0.1:0")?;
+        let receiver = tcp_server::TcpTestServer::spawn(Duration::from_secs(1))?;
+        let mut sender = TcpStream::connect(receiver.address())?;
 
         let payload = [0xAA, 0xBB, 0xCC, 0xDD];
-        let sent = forward_packet(&sender, receiver.local_addr()?, &payload)?;
+        let sent = forward_packet(&mut sender, &payload)?;
         assert_eq!(sent, payload.len());
+        sender.shutdown(Shutdown::Write)?;
 
-        let mut buf = [0_u8; 1500];
-        let (len, _) = receiver.recv_from(&mut buf)?;
-        assert_eq!(&buf[..len], &payload);
+        let got = receiver.recv(Duration::from_secs(1))?;
+        assert_eq!(got, payload);
         Ok(())
     }
 
     #[test]
     fn rejects_empty_packets() {
-        let receiver = UdpSocket::bind("127.0.0.1:0").expect("receiver bind should succeed");
-        let sender = UdpSocket::bind("127.0.0.1:0").expect("sender bind should succeed");
+        let receiver =
+            tcp_server::TcpTestServer::spawn(Duration::from_secs(1)).expect("receiver bind should succeed");
+        let mut sender = TcpStream::connect(receiver.address()).expect("sender connect should succeed");
 
-        let err = forward_packet(&sender, receiver.local_addr().expect("receiver should have address"), &[])
+        let err = forward_packet(&mut sender, &[])
             .expect_err("empty packet should be rejected");
         assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
     }

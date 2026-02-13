@@ -9,8 +9,12 @@ This repository is organized as a monorepo so multiple networking projects can l
 
 ## Project model
 
-Each project is independent and keeps its own manifest and lockfile in its own directory.  
-For Rust, `Cargo.toml` and `Cargo.lock` should stay inside `./bpf`.
+Rust project files stay inside `./bpf`.
+Zed discovers the Rust project from repository root via `.zed/settings.json` with `rust-analyzer` `linkedProjects`.
+
+- Project: `bpf/Cargo.toml`
+- Project: `bpf/Cargo.lock`
+- Editor config: `.zed/settings.json`
 
 ## Running the BPF project
 
