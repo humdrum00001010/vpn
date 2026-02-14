@@ -1,6 +1,13 @@
 # The directory Mix will write compiled artifacts to.
 /_build/
 
+# ElixirLS
+/.elixir_ls/
+
+# Local env files
+.env
+.env.*
+
 # If you run "mix test --cover", coverage assets end up here.
 /cover/
 
@@ -22,6 +29,10 @@ erl_crash.dump
 # Temporary files, for example, from tests.
 /tmp/
 
+# macOS / editor junk
+.DS_Store
+*.swp
+*.swo
+
 # Ignore package tarball (built via "mix hex.build").
 coordinator-*.tar
-

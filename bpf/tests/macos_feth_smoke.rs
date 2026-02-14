@@ -2,7 +2,7 @@
 mod macos_only {
     use macos_bpf_tunnel::config::{MONITORED_IP, TUNNEL_TARGET, build_bpf_filter};
     use macos_bpf_tunnel::runner::{RunnerConfig, forward_captured_packets_with_ready};
-    use std::net::{Ipv4Addr, SocketAddr};
+    use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
     use std::sync::mpsc;
     use std::time::Duration;
 
@@ -17,13 +17,6 @@ mod macos_only {
         include!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/support/ifconfig.rs"
-        ));
-    }
-
-    mod packet_builder {
-        include!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/support/packet_builder.rs"
         ));
     }
 
@@ -72,12 +65,10 @@ mod macos_only {
             .map_err(|_| anyhow::anyhow!("timed out waiting for capture to be ready"))?;
 
         let payload: [u8; 6] = [0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02];
-        let frame = packet_builder::build_eth_ipv4_udp_frame(peer_ip, monitored_ip, 44444, 5555, &payload);
-        let mut inject = pcap::Capture::from_device(pair.b.as_str())?
-            .immediate_mode(true)
-            .timeout(250)
-            .open()?;
-        inject.sendpacket(frame)?;
+        // Generate traffic via the kernel so link-layer details (DLT, headers) are correct for feth.
+        // Binding to the peer IP forces the packet to egress `pair.b`.
+        let udp = UdpSocket::bind(SocketAddrV4::new(peer_ip, 44444))?;
+        udp.send_to(&payload, SocketAddrV4::new(monitored_ip, 5555))?;
 
         let got = server.recv(Duration::from_secs(2))?;
         assert!(

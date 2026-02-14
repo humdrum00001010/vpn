@@ -2,9 +2,10 @@ use anyhow::{bail, Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
 use std::collections::HashMap;
-use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
+use std::net::SocketAddr;
 use std::time::{Duration, Instant};
-use tokio::time::sleep;
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::time::{interval, sleep};
 use tokio_tungstenite::tungstenite::Message;
 use url::Url;
 
@@ -48,6 +49,38 @@ fn parse_presence_state(v: &serde_json::Value) -> HashMap<String, Option<String>
     out
 }
 
+async fn resolve_udp_target(host: &str, port: u16) -> Result<SocketAddr> {
+    let mut addrs = tokio::net::lookup_host((host, port))
+        .await
+        .context("failed to resolve coordinator UDP address")?;
+    addrs
+        .next()
+        .context("coordinator UDP address resolution returned no results")
+}
+
+async fn ws_send_heartbeat<S>(ws: &mut tokio_tungstenite::WebSocketStream<S>, hb_ref: &mut u64) -> Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    // Phoenix protocol: heartbeat on topic "phoenix" with event "heartbeat".
+    // Use a monotonically increasing ref to keep the socket alive.
+    *hb_ref += 1;
+    let msg = json!(["0", hb_ref.to_string(), "phoenix", "heartbeat", {}]);
+    ws.send(Message::Text(msg.to_string()))
+        .await
+        .context("failed to send websocket heartbeat")
+}
+
+fn parse_udp_message(s: &str) -> Option<(&str, &str, &str)> {
+    // "vpn-ping <room> <client_id>"
+    // "vpn-pong <room> <client_id>"
+    let mut it = s.split_whitespace();
+    let kind = it.next()?;
+    let room = it.next()?;
+    let client_id = it.next()?;
+    Some((kind, room, client_id))
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let coordinator_host = env("COORDINATOR_HOST", "coordinator");
@@ -58,12 +91,10 @@ async fn main() -> Result<()> {
     let client_id = env_required("CLIENT_ID")?;
     let peer_id = env_required("PEER_ID")?;
     let timeout_secs: u64 = env("TIMEOUT_SECS", "15").parse()?;
+    let keepalive_secs: u64 = env("KEEPALIVE_SECS", "15").parse()?;
+    let stay_secs: u64 = env("STAY_SECS", "0").parse()?;
 
-    let udp_target: SocketAddr = (coordinator_host.as_str(), coordinator_udp_port)
-        .to_socket_addrs()
-        .context("failed to resolve coordinator UDP address")?
-        .next()
-        .context("coordinator UDP address resolution returned no results")?;
+    let udp_target = resolve_udp_target(coordinator_host.as_str(), coordinator_udp_port).await?;
     let ws_url = Url::parse(&format!(
         "ws://{}:{}/socket/websocket?vsn=2.0.0",
         coordinator_host, coordinator_http_port
@@ -71,11 +102,14 @@ async fn main() -> Result<()> {
     let ws_url_s = ws_url.to_string();
     let topic = format!("rendezvous:{room}");
 
-    // UDP registration: send before and after websocket join to avoid race with broadcasts.
-    let udp = UdpSocket::bind("0.0.0.0:0").context("failed to bind UDP socket")?;
-    udp.set_read_timeout(Some(Duration::from_millis(500)))?;
+    // One UDP socket for registration + direct peer traffic.
+    // Using a single socket increases the odds that NAT mapping stays stable.
+    let udp = tokio::net::UdpSocket::bind("0.0.0.0:0")
+        .await
+        .context("failed to bind UDP socket")?;
     let reg = json!({ "room": room, "client_id": client_id });
     udp.send_to(reg.to_string().as_bytes(), udp_target)
+        .await
         .context("failed to send UDP registration")?;
 
     // Websocket connect with retry.
@@ -97,45 +131,118 @@ async fn main() -> Result<()> {
 
     // Re-register after join so the server can broadcast udp_seen to this socket.
     udp.send_to(reg.to_string().as_bytes(), udp_target)
+        .await
         .context("failed to send UDP registration (post-join)")?;
 
     let mut peers: HashMap<String, Option<String>> = HashMap::new();
     let deadline = Instant::now() + Duration::from_secs(timeout_secs);
+    let stay_deadline = if stay_secs == 0 {
+        None
+    } else {
+        Some(Instant::now() + Duration::from_secs(stay_secs))
+    };
+
+    let mut peer_udp: Option<SocketAddr> = None;
+    let mut punch_tick = interval(Duration::from_millis(200));
+    let mut keepalive_tick = interval(Duration::from_secs(keepalive_secs.max(1)));
+    let mut coord_keepalive_tick = interval(Duration::from_secs(5));
+    let mut ws_heartbeat_tick = interval(Duration::from_secs(25));
+    let mut hb_ref: u64 = 10;
+    let mut established = false;
+    let mut buf = vec![0u8; 2048];
 
     while Instant::now() < deadline {
-        if let Some(Some(udp)) = peers.get(&peer_id) {
-            println!("{client_id} discovered peer {peer_id} at {udp}");
-            return Ok(());
+        if established {
+            if let Some(until) = stay_deadline {
+                if Instant::now() >= until {
+                    return Ok(());
+                }
+            }
         }
 
-        let msg = tokio::time::timeout(Duration::from_millis(500), ws.next()).await;
-        let Ok(Some(Ok(Message::Text(txt)))) = msg else {
-            continue;
-        };
-
-        let Some((_topic, event, payload)) = parse_phoenix_v2_message(&txt) else {
-            continue;
-        };
-
-        match event.as_str() {
-            "presence_state" => {
-                peers.extend(parse_presence_state(&payload));
+        if peer_udp.is_none() {
+            if let Some(Some(udp_s)) = peers.get(&peer_id) {
+                peer_udp = Some(
+                    udp_s.parse::<SocketAddr>()
+                        .with_context(|| format!("failed to parse peer udp endpoint {udp_s}"))?,
+                );
+                println!("{client_id} discovered peer {peer_id} at {udp_s}");
             }
-            "udp_seen" => {
-                if let Some(obj) = payload.as_object() {
-                    let cid = obj.get("client_id").and_then(|v| v.as_str());
-                    let udp = obj.get("udp").and_then(|v| v.as_str());
-                    if let (Some(cid), Some(udp)) = (cid, udp) {
-                        peers.insert(cid.to_string(), Some(udp.to_string()));
+        }
+
+        tokio::select! {
+            _ = coord_keepalive_tick.tick() => {
+                // Keep coordinator observation fresh (and keep the NAT mapping to the coordinator alive).
+                let _ = udp.send_to(reg.to_string().as_bytes(), udp_target).await;
+            }
+            _ = ws_heartbeat_tick.tick() => {
+                // Keep websocket alive so Presence doesn't silently drop.
+                let _ = ws_send_heartbeat(&mut ws, &mut hb_ref).await;
+            }
+            _ = punch_tick.tick(), if peer_udp.is_some() && !established => {
+                let peer = peer_udp.unwrap();
+                let msg = format!("vpn-ping {room} {client_id}");
+                let _ = udp.send_to(msg.as_bytes(), peer).await;
+            }
+            _ = keepalive_tick.tick(), if peer_udp.is_some() && established => {
+                let peer = peer_udp.unwrap();
+                let msg = format!("vpn-ping {room} {client_id}");
+                let _ = udp.send_to(msg.as_bytes(), peer).await;
+            }
+            recv = udp.recv_from(&mut buf) => {
+                let (n, from) = recv.context("udp recv_from failed")?;
+                let txt = String::from_utf8_lossy(&buf[..n]);
+
+                if let Some((kind, msg_room, msg_client)) = parse_udp_message(&txt) {
+                    if msg_room == room && msg_client == peer_id {
+                        // Accept traffic from whatever endpoint actually works, even if it differs
+                        // from rendezvous-discovered "ip:port" (symmetric NAT will often break that).
+                        if peer_udp.is_none() {
+                            peer_udp = Some(from);
+                        }
+
+                        if kind == "vpn-ping" {
+                            let reply = format!("vpn-pong {room} {client_id}");
+                            let _ = udp.send_to(reply.as_bytes(), from).await;
+                        }
+
+                        if kind == "vpn-ping" || kind == "vpn-pong" {
+                            if !established {
+                                println!("{client_id} direct udp ok with {peer_id} (from {from})");
+                                established = true;
+                                if stay_deadline.is_none() {
+                                    return Ok(());
+                                }
+                            }
+                        }
                     }
                 }
             }
-            "phx_reply" => {}
-            _ => {}
+            msg = tokio::time::timeout(Duration::from_millis(500), ws.next()) => {
+                let Ok(Some(Ok(Message::Text(txt)))) = msg else { continue; };
+                let Some((_topic, event, payload)) = parse_phoenix_v2_message(&txt) else { continue; };
+
+                match event.as_str() {
+                    "presence_state" => {
+                        peers.extend(parse_presence_state(&payload));
+                    }
+                    "udp_seen" => {
+                        if let Some(obj) = payload.as_object() {
+                            let cid = obj.get("client_id").and_then(|v| v.as_str());
+                            let udp = obj.get("udp").and_then(|v| v.as_str());
+                            if let (Some(cid), Some(udp)) = (cid, udp) {
+                                peers.insert(cid.to_string(), Some(udp.to_string()));
+                            }
+                        }
+                    }
+                    "phx_reply" => {}
+                    _ => {}
+                }
+            }
         }
     }
 
-    bail!("{client_id} timed out waiting to discover peer {peer_id}");
+    bail!("{client_id} timed out waiting for direct udp with peer {peer_id}");
 }
 
 #[cfg(test)]

@@ -1,8 +1,24 @@
 {
+  "languages": {
+    "Elixir": {
+      "language_servers": ["elixir-ls", "!expert", "!next-ls", "!lexical", "..."]
+    },
+    "HEEX": {
+      "language_servers": ["elixir-ls", "!expert", "!next-ls", "!lexical", "..."]
+    }
+  },
   "lsp": {
     "rust-analyzer": {
       "initialization_options": {
         "linkedProjects": ["./bpf/Cargo.toml"]
+      }
+    },
+    "elixir-ls": {
+      "binary": {
+        "path": "./tools/zed-elixir-ls.sh"
+      },
+      "settings": {
+        "dialyzerEnabled": false
       }
     }
   }
