@@ -7,9 +7,20 @@
 # General application configuration
 import Config
 
+config :ash, default_string_length_count: :codepoints
+
+config :spark,
+  formatter: [
+    "Ash.Resource": [section_order: [:authentication, :token, :user_identity, :postgres]]
+  ]
+
+config :ash, known_types: [AshPostgres.Timestamptz, AshPostgres.TimestamptzUsec]
+
 config :coord,
   ecto_repos: [Coord.Repo],
-  generators: [timestamp_type: :utc_datetime]
+  generators: [timestamp_type: :utc_datetime],
+  ash_domains: [Coord.Accounts],
+  ash_authentication: [return_error_on_invalid_magic_link_token?: true]
 
 # Configure the endpoint
 config :coord, CoordWeb.Endpoint,

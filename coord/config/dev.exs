@@ -53,7 +53,7 @@ config :coord, CoordWeb.Endpoint,
 # different ports.
 
 # Enable dev routes for dashboard and mailbox
-config :coord, dev_routes: true
+config :coord, dev_routes: true, token_signing_secret: "5mE+v9K6LB54ZXTkCl3SCGLQqd7rXVp0"
 
 # Do not include metadata nor timestamps in development logs
 config :logger, :default_formatter, format: "[$level] $message\n"

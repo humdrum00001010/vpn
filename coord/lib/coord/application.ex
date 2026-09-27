@@ -15,7 +15,8 @@ defmodule Coord.Application do
       # Start a worker by calling: Coord.Worker.start_link(arg)
       # {Coord.Worker, arg},
       # Start to serve requests, typically the last entry
-      CoordWeb.Endpoint
+      CoordWeb.Endpoint,
+      {AshAuthentication.Supervisor, [otp_app: :coord]}
     ]
 
     # See https://elixir.hexdocs.pm/Supervisor.html
