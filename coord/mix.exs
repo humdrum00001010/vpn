@@ -5,7 +5,7 @@ defmodule Coord.MixProject do
     [
       app: :coord,
       version: "0.1.0",
-      elixir: "~> 1.17",
+      elixir: "1.20.4",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
@@ -46,6 +46,7 @@ defmodule Coord.MixProject do
       {:ash_authentication_phoenix, "~> 2.0"},
       {:ash_phoenix, "~> 2.0"},
       {:ash_postgres, "~> 2.0"},
+      {:igniter, "~> 0.8", only: [:dev, :test], runtime: false},
       {:tidewave, "~> 0.9", only: [:dev]},
       {:phoenix, "~> 1.8.14"},
       {:phoenix_ecto, "~> 4.5"},

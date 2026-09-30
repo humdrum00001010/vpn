@@ -1,0 +1,12 @@
+<main id="cli-login" class="mx-auto max-w-md px-6 py-12">
+  <h1 class="text-xl font-semibold">Sign in to your CLI</h1>
+  <p class="mt-2 text-sm">
+    Enter your email to receive a sign-in link for the CLI you just opened.
+  </p>
+
+  <.form for={@form} id="cli-login-form" action={~p"/auth/user/login"} class="mt-6 space-y-4">
+    <.input field={@form[:socket_id]} type="hidden" />
+    <.input field={@form[:email]} type="email" label="Email" autocomplete="email" required />
+    <.button>Send sign-in link</.button>
+  </.form>
+</main>

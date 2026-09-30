@@ -11,6 +11,7 @@ config :ash, default_string_length_count: :codepoints
 
 config :spark,
   formatter: [
+    remove_parens?: true,
     "Ash.Resource": [section_order: [:authentication, :token, :user_identity, :postgres]]
   ]
 
@@ -21,6 +22,8 @@ config :coord,
   generators: [timestamp_type: :utc_datetime],
   ash_domains: [Coord.Accounts],
   ash_authentication: [return_error_on_invalid_magic_link_token?: true]
+
+config :coord, CoordWeb.AuthChannel, timeout_ms: :timer.minutes(10)
 
 # Configure the endpoint
 config :coord, CoordWeb.Endpoint,

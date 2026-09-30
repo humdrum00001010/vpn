@@ -17,6 +17,7 @@ config :coord, Coord.Repo,
 # watchers to your application. For example, we can use it
 # to bundle .js and .css sources.
 config :coord, CoordWeb.Endpoint,
+  url: [host: "localhost", port: String.to_integer(System.get_env("PORT", "4000"))],
   # Binding to loopback ipv4 address prevents access from other machines.
   # Change to `ip: {0, 0, 0, 0}` to allow access from other machines.
   http: [ip: {127, 0, 0, 1}],

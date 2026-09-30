@@ -4,6 +4,7 @@ defmodule CoordWeb.Router do
   pipeline :browser do
     plug :accepts, ["html"]
     plug :fetch_session
+    plug CoordWeb.UserAuth, :fetch_current_user
     plug :fetch_live_flash
     plug :put_root_layout, html: {CoordWeb.Layouts, :root}
     plug :protect_from_forgery
@@ -18,6 +19,15 @@ defmodule CoordWeb.Router do
     pipe_through :browser
 
     get "/", PageController, :home
+  end
+
+  scope "/auth/user", CoordWeb do
+    pipe_through :browser
+
+    get "/login", MagicLinkController, :new
+    post "/login", MagicLinkController, :request
+    get "/magic_link", MagicLinkController, :confirm
+    post "/magic_link", MagicLinkController, :complete
   end
 
   # Other scopes may use custom stacks.

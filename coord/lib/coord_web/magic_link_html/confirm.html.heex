@@ -1,0 +1,9 @@
+<main>
+  <p>Confirm this sign-in request to finish signing in.</p>
+
+  <.form for={@form} id="magic-link-confirm-form" action={~p"/auth/user/magic_link"}>
+    <.input field={@form[:token]} type="hidden" />
+    <.input field={@form[:socket_id]} type="hidden" />
+    <.button>Confirm sign-in</.button>
+  </.form>
+</main>

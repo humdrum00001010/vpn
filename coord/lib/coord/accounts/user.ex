@@ -38,6 +38,10 @@ defmodule Coord.Accounts.User do
     bypass AshAuthentication.Checks.AshAuthenticationInteraction do
       authorize_if always()
     end
+
+    policy action(:by_session_token) do
+      authorize_if always()
+    end
   end
 
   postgres do
@@ -54,8 +58,24 @@ defmodule Coord.Accounts.User do
     end
   end
 
+  relationships do
+    has_many :sessions, Coord.Accounts.UserSession
+  end
+
   actions do
     defaults [:read]
+
+    read :by_session_token do
+      get? true
+      argument :token, :binary, allow_nil?: false, sensitive?: true
+
+      filter expr(
+               exists(
+                 sessions,
+                 context == "session" and token == ^arg(:token) and inserted_at > ago(14, :day)
+               )
+             )
+    end
 
     read :get_by_subject do
       description "Get a user by the subject claim in a JWT"
